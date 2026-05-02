@@ -17,6 +17,8 @@ export const config = {
 
   geminiKey: env.GEMINI_API_KEY ?? '',
   geminiModel: env.GEMINI_MODEL || 'gemini-3.8-flash',
+  // Used when the main model times out or is overloaded (503).
+  geminiFallbackModel: env.GEMINI_FALLBACK_MODEL || 'gemini-3.5-flash-lite',
 
   deepgramKey: env.DEEPGRAM_API_KEY ?? '',
   deepgramModel: env.DEEPGRAM_MODEL || 'nova-3',
