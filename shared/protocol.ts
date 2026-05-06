@@ -102,10 +102,61 @@ export interface HomeData {
   importantUnread: number
   pendingDrafts: Draft[]
   pendingInvites: InviteDraft[]
+  /** Agent-prepared actions (doc/sheet edits, event changes) awaiting approval. */
+  pendingActions: PendingRef[]
+  recent: VoiceExchange[]
 }
+
+// ── Chat agent ──────────────────────────────────────────────────────────
+
+/** Where the user was when they asked, so "this one" can resolve. */
+export interface ChatContext {
+  screen: 'home' | 'inbox' | 'chat' | 'card' | 'other'
+  focusEmailId?: string
+}
+
+export interface CardItem {
+  id: string
+  kind: 'email' | 'event' | 'file' | 'contact' | 'row' | 'text'
+  title: string
+  detail?: string
+}
+
+/** Something the agent attaches to a reply for the user to open. */
+export type Card =
+  | { kind: 'list'; title: string; items: CardItem[] }
+  | { kind: 'text'; title: string; text: string }
+  | { kind: 'draft'; draft: Draft }
+  | { kind: 'invite'; invite: InviteDraft }
+  | { kind: 'edit'; title: string; lines: string[] }
+
+/** A side effect the agent prepared; nothing runs until the user approves it. */
+export interface PendingRef {
+  id: string
+  kind: 'draft' | 'invite' | 'action'
+  /** Button label, e.g. "Send to Sam", "Add 1 row to Budget", "Delete event". */
+  label: string
+}
+
+export interface ChatReply {
+  turnId: string
+  text: string
+  card?: Card
+  pending?: PendingRef
+}
+
+export interface ChatTurn {
+  id: string
+  at: string
+  heard: string
+  reply: ChatReply
+}
+
+export type ActionDecision = 'approve' | 'discard'
 
 export type VoiceContext =
   | { kind: 'home' }
+  | { kind: 'chat'; ctx: ChatContext }
   | { kind: 'reply'; emailId: string }
   | { kind: 'followup'; eventId: string }
   | { kind: 'redo'; draftId: string }
