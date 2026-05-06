@@ -5,7 +5,7 @@
 //
 // Imported by both packages, so this file must stay dependency-free.
 
-export const PROTOCOL_VERSION = '0.2.0'
+export const PROTOCOL_VERSION = '0.3.0'
 
 // ── Data ────────────────────────────────────────────────────────────────
 
@@ -81,6 +81,18 @@ export interface InviteDraft {
   location?: string
   status: ItemStatus
   createdAt: string
+}
+
+/** One voice interaction, kept so the user can see what was heard and what came of it. */
+export interface VoiceExchange {
+  id: string
+  at: string
+  ctx: VoiceContext['kind']
+  heard: string
+  /** 'draft' | 'invite' | 'contacts' | 'unknown' | 'error' */
+  outcome: string
+  /** Short human-readable result: draft subject, invite title, hint or error. */
+  detail: string
 }
 
 export interface HomeData {
