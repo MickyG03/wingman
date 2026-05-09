@@ -185,9 +185,13 @@ export type Request =
   | { type: 'contact.pick'; pendingId: string; index: number }
   | { type: 'draft.act'; draftId: string; action: DraftAction }
   | { type: 'invite.act'; inviteId: string; action: InviteAction }
+  | { type: 'chat.send'; text: string; ctx: ChatContext; pick?: CardItem }
+  | { type: 'chat.history' }
+  | { type: 'chat.reset' }
+  | { type: 'action.act'; id: string; action: ActionDecision }
   | { type: 'auth.start' }
 
-export type DoneKind = 'sent' | 'saved' | 'created' | 'discarded'
+export type DoneKind = 'sent' | 'saved' | 'created' | 'discarded' | 'done'
 
 export interface ResponseMap {
   'home.get': { type: 'home'; data: HomeData }
