@@ -199,8 +199,12 @@ export interface ResponseMap {
   'email.get': { type: 'email'; email: EmailDetail }
   'meeting.get': { type: 'meeting'; meeting: Meeting; briefing: Briefing }
   'voice.start': { type: 'ok' }
-  'voice.stop': { type: 'voice.result'; result: VoiceResult }
+  'voice.stop': { type: 'voice.result'; result: VoiceResult } | { type: 'chat.reply'; reply: ChatReply }
   'voice.cancel': { type: 'ok' }
+  'chat.send': { type: 'chat.reply'; reply: ChatReply }
+  'chat.history': { type: 'chat.history'; turns: ChatTurn[] }
+  'chat.reset': { type: 'ok' }
+  'action.act': { type: 'done'; kind: DoneKind; message: string }
   'draft.get': { type: 'voice.result'; result: VoiceResult }
   'draft.fromSuggestion': { type: 'voice.result'; result: VoiceResult }
   'contact.pick': { type: 'voice.result'; result: VoiceResult }
