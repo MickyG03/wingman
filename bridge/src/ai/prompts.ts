@@ -1,4 +1,4 @@
-import type { Meeting, Person } from '../../../shared/protocol.ts'
+import type { Meeting, Person, VoiceExchange } from '../../../shared/protocol.ts'
 import type { RawEmail } from '../google/ports.ts'
 import type { DraftText, TriageInput, UserContext } from './types.ts'
 
@@ -6,7 +6,7 @@ export function firstName(name: string): string {
   return name.trim().split(/\s+/)[0] || name
 }
 
-function localNow(timeZone: string, now = new Date()): string {
+export function localNow(timeZone: string, now = new Date()): string {
   const when = now.toLocaleString('en-US', {
     timeZone,
     weekday: 'long',
@@ -84,8 +84,15 @@ export const briefingPrompt = (meeting: Meeting, related: RawEmail[]) =>
     ...related.map(m => `---\n${emailBlock(m, 800)}`),
   ].join('\n')
 
-export const intentPrompt = (transcript: string, contactNames: string[]) =>
+export const intentPrompt = (transcript: string, contactNames: string[], recent: VoiceExchange[] = []) =>
   [
+    ...(recent.length
+      ? [
+          'Earlier voice requests (newest first), for context. The new request may correct or continue one of them:',
+          ...recent.map(r => `- heard "${r.heard}" -> ${r.outcome}: ${r.detail}`),
+          '',
+        ]
+      : []),
     'The user spoke this request to their glasses (speech-to-text, may contain small errors):',
     `"${transcript}"`,
     '',
@@ -123,6 +130,9 @@ export const followupPrompt = (meeting: Meeting, notes: string) =>
 export const redoPrompt = (draft: DraftText, instruction: string) =>
   [
     'Revise this email draft according to the user\'s instruction. Return the full revised subject and body.',
+    'If the instruction changes who the email goes to, return the new recipients in "to" (names, or addresses).',
+    'A spoken address like "anshuman dot shankar at gmail dot com" means anshuman.shankar@gmail.com: normalise it.',
+    'Otherwise return an empty "to" array and keep the current recipients. Update the greeting to match a new recipient.',
     `Instruction (spoken): "${instruction}"`,
     '',
     `To: ${draft.to.map(person).join(', ')}`,
@@ -186,5 +196,10 @@ export const schemas = {
     type: 'object',
     properties: { subject: S, body: S },
     required: ['subject', 'body'],
+  },
+  redo: {
+    type: 'object',
+    properties: { subject: S, body: S, to: strArray },
+    required: ['subject', 'body', 'to'],
   },
 }
