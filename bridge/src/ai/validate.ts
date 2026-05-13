@@ -3,7 +3,7 @@
 // glasses.
 
 import type { Briefing, EmailCategory, Suggestion } from '../../../shared/protocol.ts'
-import type { EmailText, HomeIntent, TriageResult } from './types.ts'
+import type { EmailText, HomeIntent, RedoText, TriageResult } from './types.ts'
 
 const CATEGORIES: EmailCategory[] = ['action', 'fyi', 'newsletter', 'notification']
 
@@ -89,4 +89,9 @@ export function validateIntent(v: unknown, now = Date.now()): HomeIntent {
     }
   }
   return { intent: 'unknown', hint: str(o.hint, 120, "I didn't understand. Try \"Email Sam that...\" or \"Lunch with Sam Friday at 1\".") }
+}
+
+export function validateRedo(v: unknown): RedoText {
+  const o = isObj(v) ? v : {}
+  return { ...validateEmailText(o), to: strList(o.to, 10, 120) }
 }
