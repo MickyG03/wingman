@@ -89,8 +89,8 @@ export class GeminiAi implements Ai {
     return validateBriefing(await this.generateJson(P.briefingPrompt(meeting, related), P.schemas.briefing, 'briefing'))
   }
 
-  async homeIntent(transcript: string, contactNames: string[]) {
-    return validateIntent(await this.generateJson(P.intentPrompt(transcript, contactNames), P.schemas.intent, 'intent'))
+  async homeIntent(transcript: string, contactNames: string[], recent: VoiceExchange[]) {
+    return validateIntent(await this.generateJson(P.intentPrompt(transcript, contactNames, recent), P.schemas.intent, 'intent'))
   }
 
   async reply(thread: RawEmail[], instruction: string) {
@@ -102,6 +102,6 @@ export class GeminiAi implements Ai {
   }
 
   async redo(draft: DraftText, instruction: string) {
-    return validateEmailText(await this.generateJson(P.redoPrompt(draft, instruction), P.schemas.email, 'redo'))
+    return validateRedo(await this.generateJson(P.redoPrompt(draft, instruction), P.schemas.redo, 'redo'))
   }
 }
