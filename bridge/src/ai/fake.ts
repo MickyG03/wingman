@@ -1,10 +1,10 @@
 // Deterministic stand-in for Gemini when GEMINI_API_KEY is not set, so the
 // whole flow can be exercised in the simulator. Output is obviously canned.
 
-import type { Briefing, EmailCategory, Meeting } from '../../../shared/protocol.ts'
+import type { Briefing, EmailCategory, Meeting, VoiceExchange } from '../../../shared/protocol.ts'
 import type { RawEmail } from '../google/ports.ts'
 import { firstName } from './prompts.ts'
-import type { Ai, DraftText, EmailText, HomeIntent, TriageInput, TriageResult, UserContext } from './types.ts'
+import type { Ai, DraftText, EmailText, HomeIntent, RedoText, TriageInput, TriageResult, UserContext } from './types.ts'
 import { str, validateIntent } from './validate.ts'
 
 const DAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
@@ -96,7 +96,7 @@ export class FakeAi implements Ai {
     }
   }
 
-  async homeIntent(transcript: string, _contactNames: string[]): Promise<HomeIntent> {
+  async homeIntent(transcript: string, _contactNames: string[], _recent: VoiceExchange[]): Promise<HomeIntent> {
     const t = transcript.trim()
     const lower = t.toLowerCase()
     const invite = /\b(lunch|dinner|coffee|meeting|meet|call|invite|schedule|sync)\b/.test(lower)
@@ -143,9 +143,10 @@ export class FakeAi implements Ai {
     }
   }
 
-  async redo(draft: DraftText, instruction: string): Promise<EmailText> {
+  async redo(draft: DraftText, instruction: string): Promise<RedoText> {
+    const to = /\b(?:send|goes|go|email) (?:it )?(?:to|by) ([a-z0-9@._-]+(?: [a-z]+)?)/i.exec(instruction)?.[1]
     const greeting = draft.body.split('\n')[0] || `Hi ${firstName(draft.to[0]?.name ?? 'there')},`
-    return { subject: draft.subject, body: `${greeting}\n\n${sentence(instruction)}\n\n${this.signOff()}` }
+    return { subject: draft.subject, body: `${greeting}\n\n${sentence(instruction)}\n\n${this.signOff()}`, to: to ? [to] : [] }
   }
 }
 
