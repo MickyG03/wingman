@@ -5,7 +5,7 @@
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
-import type { Draft, InviteDraft, ItemStatus } from '../../shared/protocol.ts'
+import type { Draft, InviteDraft, ItemStatus, Person } from '../../shared/protocol.ts'
 
 /** Reply threading details kept on the bridge, never sent to the glasses. */
 export interface DraftMeta {
@@ -87,11 +87,11 @@ export class DraftStore {
     return this.invites.get(id)
   }
 
-  /** Replaces subject/body of a pending draft (Redo). */
-  revise(id: string, subject: string, body: string): Draft | null {
+  /** Replaces subject/body (and optionally recipients) of a pending draft (Redo). */
+  revise(id: string, subject: string, body: string, to?: Person[]): Draft | null {
     const d = this.drafts.get(id)
     if (!d || d.draft.status !== 'pending') return null
-    d.draft = { ...d.draft, subject, body }
+    d.draft = { ...d.draft, subject, body, ...(to?.length ? { to } : {}) }
     this.save()
     return d.draft
   }
