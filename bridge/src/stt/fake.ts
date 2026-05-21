@@ -3,6 +3,7 @@ import type { SttFactory } from './types.ts'
 
 const SCRIPTS: Record<VoiceContext['kind'], string> = {
   home: 'Email Priya that I am running ten minutes late to the design review',
+  chat: 'What is unread',
   reply: 'Thursday works, see you at 12:30',
   followup: 'We agreed to launch on October 27 once the analytics hooks are in. Sam owns the checklist',
   redo: 'Make it shorter and more casual',
