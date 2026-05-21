@@ -38,6 +38,8 @@ export function deepgramStt(apiKey: string, model: string): SttFactory {
     let closed = false
     let error: Error | null = null
     let onFinalized: (() => void) | null = null
+    let sentBytes = 0
+    let results = 0
 
     const text = () => finals.join(' ').trim()
 
@@ -57,7 +59,11 @@ export function deepgramStt(apiKey: string, model: string): SttFactory {
       } catch {
         return
       }
-      if (msg.type !== 'Results') return
+      if (msg.type !== 'Results') {
+        if (msg.type !== 'Metadata' && msg.type !== 'UtteranceEnd' && msg.type !== 'SpeechStarted') console.log(`[stt] deepgram: ${JSON.stringify(msg).slice(0, 200)}`)
+        return
+      }
+      results++
       const r = msg as DgResult
       const t = r.channel?.alternatives?.[0]?.transcript?.trim() ?? ''
       if (r.is_final) {
@@ -91,6 +97,7 @@ export function deepgramStt(apiKey: string, model: string): SttFactory {
     return {
       push(pcm) {
         if (closed) return
+        sentBytes += pcm.length
         if (ws.readyState === WebSocket.OPEN) ws.send(pcm)
         else pending.push(pcm)
       },
@@ -121,6 +128,7 @@ export function deepgramStt(apiKey: string, model: string): SttFactory {
         }
         shutdown()
         const result = [text(), interim].filter(Boolean).join(' ').trim()
+        console.log(`[stt] deepgram: ${(sentBytes / 32000).toFixed(1)}s sent, ${results} results, ${finals.length} final segments${error ? `, error: ${error.message}` : ''}`)
         if (!result && error) throw new Error(`Speech-to-text failed: ${(error as Error).message}`)
         return result
       },
