@@ -3,7 +3,7 @@
 
 import type { InviteDraft, Meeting } from '../../../shared/protocol.ts'
 import { buildEmails, buildMeetings, SELF } from './fixtures.ts'
-import type { CalendarPort, MailPort, RawEmail } from './ports.ts'
+import { MIME, type CalendarPort, type DocsPort, type DriveFile, type DrivePort, type EventPatch, type MailPort, type RawEmail, type SheetsPort } from './ports.ts'
 
 function decodeSubject(raw: string): string {
   const text = Buffer.from(raw, 'base64url').toString('utf8')
@@ -39,6 +39,25 @@ export class FakeMail implements MailPort {
     return this.all
       .filter(e => e.threadId === threadId)
       .sort((a, b) => a.date.localeCompare(b.date))
+  }
+
+  /** Supports the Gmail operators the agent uses: from:, to:, subject:, is:unread, plain words. */
+  async search(query: string, max: number) {
+    const terms = query.toLowerCase().split(/\s+/).filter(Boolean)
+    const matches = (m: RawEmail) =>
+      terms.every(t => {
+        if (t === 'is:unread') return m.unread
+        if (t.startsWith('from:')) return `${m.from.name} ${m.from.email}`.toLowerCase().includes(t.slice(5))
+        if (t.startsWith('to:')) return m.to.some(p => `${p.name} ${p.email}`.toLowerCase().includes(t.slice(3)))
+        if (t.startsWith('subject:')) return m.subject.toLowerCase().includes(t.slice(8))
+        if (t.startsWith('newer_than:') || t.startsWith('in:') || t.startsWith('-')) return true
+        return `${m.subject} ${m.snippet} ${m.from.name}`.toLowerCase().includes(t.replace(/^"|"$/g, ''))
+      })
+    return this.all
+      .filter(matches)
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, max)
+      .map(m => ({ ...m, bodyText: '' }))
   }
 
   async searchWith(emails: string[], max: number) {
@@ -82,6 +101,13 @@ export class FakeCalendar implements CalendarPort {
     return this.events
       .filter(e => new Date(e.end).getTime() > now && new Date(e.start).getTime() < until)
       .sort((a, b) => a.start.localeCompare(b.start))
+  }
+
+  async between(fromIso: string, toIso: string, max: number) {
+    return this.events
+      .filter(e => e.end > fromIso && e.start < toIso)
+      .sort((a, b) => a.start.localeCompare(b.start))
+      .slice(0, max)
   }
 
   async get(id: string) {
