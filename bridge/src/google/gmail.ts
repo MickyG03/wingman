@@ -98,6 +98,10 @@ export class GmailMail implements MailPort {
     })
   }
 
+  async search(query: string, max: number) {
+    return this.auth.call(async () => this.fetch(await this.listIds({ q: query, maxResults: max }), false))
+  }
+
   async searchWith(emails: string[], max: number) {
     if (emails.length === 0) return []
     // `{a b}` is Gmail's OR group.
