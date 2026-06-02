@@ -10,11 +10,16 @@ import { AuthNeededError } from './ports.ts'
 
 // gmail.modify covers reading, marking read, drafts and sending with one consent.
 // The two contacts scopes are read-only and resolve spoken names to addresses.
+// drive.file limits file creation to files Wingman made; drive.readonly covers search and reading.
 export const SCOPES = [
   'https://www.googleapis.com/auth/gmail.modify',
   'https://www.googleapis.com/auth/calendar.events',
   'https://www.googleapis.com/auth/contacts.readonly',
   'https://www.googleapis.com/auth/contacts.other.readonly',
+  'https://www.googleapis.com/auth/drive.readonly',
+  'https://www.googleapis.com/auth/drive.file',
+  'https://www.googleapis.com/auth/documents',
+  'https://www.googleapis.com/auth/spreadsheets',
 ]
 
 export type OAuth2Client = InstanceType<typeof auth.OAuth2>
@@ -85,6 +90,13 @@ export class GoogleAuth extends EventEmitter {
     try {
       const tokens = JSON.parse(fs.readFileSync(paths.googleToken, 'utf8'))
       if (!tokens.refresh_token) return false
+      // A token from before new scopes were added can't reach the new APIs.
+      const granted = new Set(String(tokens.scope ?? '').split(/\s+/))
+      const missing = SCOPES.filter(s => !granted.has(s))
+      if (tokens.scope && missing.length) {
+        console.warn(`[google] sign-in is missing ${missing.length} permission(s): run \`npm run auth\` again`)
+        return false
+      }
       this.client.setCredentials(tokens)
       this.needed = false
       return true
