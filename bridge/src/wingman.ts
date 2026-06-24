@@ -7,6 +7,11 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type {
   Briefing,
+  CardItem,
+  ChatContext,
+  ChatReply,
+  ChatTurn,
+  PendingRef,
   DoneKind,
   DraftAction,
   EmailDetail,
@@ -17,8 +22,10 @@ import type {
   Meeting,
   Person,
   VoiceContext,
+  VoiceExchange,
   VoiceResult,
 } from '../../shared/protocol.ts'
+import type { ToolHost } from './agent/types.ts'
 import { firstName } from './ai/prompts.ts'
 import type { Ai, EmailText, TriageResult, UserContext } from './ai/types.ts'
 import { config } from './config.ts'
@@ -40,7 +47,8 @@ export class WingmanError extends Error {
 
 interface PendingResolution {
   id: string
-  kind: 'email' | 'invite'
+  kind: 'email' | 'invite' | 'redo'
+  draftId?: string // for redo: the pending draft being revised
   transcript: string
   names: string[] // still to resolve, in order
   resolved: Person[]
@@ -60,19 +68,36 @@ export interface WingmanDeps {
   contactsFile: string | null
 }
 
+/** Pieces of Wingman the chat agent's tools reuse. */
+export interface AgentLike {
+  ask(text: string, ctx: ChatContext, pick: CardItem | undefined, progress: (label: string) => void): Promise<ChatReply>
+  act(id: string, approve: boolean): Promise<{ kind: DoneKind; message: string }>
+  history(): ChatTurn[]
+  reset(): void
+  pendingActions(): PendingRef[]
+  note(text: string): void
+}
+
 const PENDING_TTL_MS = 10 * 60_000
 const INBOX_FETCH = 25
 const INBOX_SHOW = 20
 const CONTACTS_MAX_AGE_MS = 12 * 3_600_000
+const RECENT_KEEP = 6
 
 export class Wingman extends EventEmitter {
   private readonly contacts = new ContactIndex()
+
+  /** Shared with the chat agent for name resolution. */
+  get contactIndex(): ContactIndex {
+    return this.contacts
+  }
   private self: Person = { name: config.userName || 'Me', email: '' }
   private events: Meeting[] = []
   private inbox: RawEmail[] = []
   private readonly triage = new Map<string, TriageResult>()
   private readonly briefings = new Map<string, Briefing>()
   private readonly pending = new Map<string, PendingResolution>()
+  private readonly history: VoiceExchange[] = []
   private loaded: Promise<void> | null = null
   private signature = ''
   private triaging = false
