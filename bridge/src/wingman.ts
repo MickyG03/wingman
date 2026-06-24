@@ -296,6 +296,8 @@ export class Wingman extends EventEmitter {
       importantUnread: this.inbox.filter(m => m.unread && this.triage.get(m.id)?.important).length,
       pendingDrafts: this.d.drafts.pendingDrafts().slice(0, 3),
       pendingInvites: this.d.drafts.pendingInvites().slice(0, 3),
+      pendingActions: this.agent?.pendingActions() ?? [],
+      recent: this.recentExchanges(),
     }
   }
 
@@ -365,14 +367,116 @@ export class Wingman extends EventEmitter {
     return { meeting: this.present(meeting), briefing }
   }
 
+  // ── Chat agent ─────────────────────────────────────────────────────────
+
+  private agent: AgentLike | null = null
+
+  attachAgent(agent: AgentLike) {
+    this.agent = agent
+  }
+
+  private requireAgent(): AgentLike {
+    if (!this.agent) throw new WingmanError('INTERNAL', 'Chat agent is not configured')
+    return this.agent
+  }
+
+  /** What the agent's tools borrow from Wingman. */
+  readonly host: ToolHost = {
+    emailDetail: async id => {
+      const e = await this.email(id)
+      return { subject: e.subject, from: e.from, bodyText: e.bodyText, suggestions: e.suggestions }
+    },
+    replyDraft: async (emailId, body) => {
+      await this.ready()
+      const raw = await this.d.mail.getEmail(emailId)
+      const d = this.replyDraft(raw, { subject: '', body })
+      return { id: d.id, to: d.to, subject: d.subject }
+    },
+    meetingBriefing: async eventId => {
+      const { meeting, briefing } = await this.meeting(eventId)
+      return { title: meeting.title, ...briefing }
+    },
+  }
+
+  async chat(text: string, ctx: ChatContext, pick: CardItem | undefined, progress: (label: string) => void): Promise<ChatReply> {
+    await this.ready()
+    const agent = this.requireAgent()
+    const heard = text.trim()
+    if (!heard) {
+      return { turnId: randomUUID(), text: 'No speech was heard. Check the Even app has microphone permission, then hold and speak.' }
+    }
+    try {
+      const reply = await agent.ask(heard, ctx, pick, progress)
+      this.record({ kind: 'chat', ctx }, heard, reply.pending ? `chat:${reply.pending.kind}` : 'chat', reply.text)
+      this.emit('changed', 'home')
+      return reply
+    } catch (err) {
+      this.record({ kind: 'chat', ctx }, heard, 'error', (err as Error).message)
+      throw err
+    }
+  }
+
+  chatHistory(): ChatTurn[] {
+    return this.requireAgent().history()
+  }
+
+  chatReset() {
+    this.requireAgent().reset()
+  }
+
+  async actionAct(id: string, approve: boolean): Promise<{ kind: DoneKind; message: string }> {
+    const result = await this.requireAgent().act(id, approve)
+    this.emit('changed', 'home')
+    return result
+  }
+
   // ── Voice → drafts / invites ───────────────────────────────────────────
 
+  /** Last few voice interactions, newest first, for the glasses "Recent" screen and as AI context. */
+  recentExchanges(limit = RECENT_KEEP): VoiceExchange[] {
+    return this.history.slice(0, limit)
+  }
+
+  private record(ctx: VoiceContext, heard: string, outcome: string, detail: string) {
+    this.history.unshift({ id: randomUUID(), at: new Date().toISOString(), ctx: ctx.kind, heard, outcome, detail })
+    this.history.length = Math.min(this.history.length, RECENT_KEEP)
+    this.emit('changed', 'home')
+  }
+
   async processVoice(ctx: VoiceContext, transcript: string): Promise<VoiceResult> {
-    await this.ready()
     const text = transcript.trim()
-    if (!text) return { kind: 'unknown', hint: "I didn't catch that. Hold and speak again.", transcript }
+    try {
+      const result = await this.processVoiceInner(ctx, text)
+      const detail =
+        result.kind === 'draft'
+          ? `Draft: ${result.draft.subject}`
+          : result.kind === 'invite'
+            ? `Invite: ${result.invite.title}`
+            : result.kind === 'contacts'
+              ? `Which "${result.query}"?`
+              : result.hint
+      this.record(ctx, text, result.kind, detail)
+      if (result.kind === 'unknown') console.log(`[voice] unknown: ${result.hint}`)
+      return result
+    } catch (err) {
+      this.record(ctx, text, 'error', (err as Error).message)
+      throw err
+    }
+  }
+
+  private async processVoiceInner(ctx: VoiceContext, text: string): Promise<VoiceResult> {
+    await this.ready()
+    if (!text) {
+      return {
+        kind: 'unknown',
+        hint: 'No speech was heard. Check the Even app has microphone permission, then hold and speak.',
+        transcript: text,
+      }
+    }
 
     switch (ctx.kind) {
+      case 'chat':
+        throw new WingmanError('BAD_REQUEST', 'Chat requests go through chat()')
       case 'home':
         return this.fromIntent(text)
       case 'reply': {
