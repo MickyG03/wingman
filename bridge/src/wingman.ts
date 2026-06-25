@@ -495,9 +495,24 @@ export class Wingman extends EventEmitter {
         const stored = this.d.drafts.getDraft(ctx.draftId)
         if (!stored || stored.draft.status !== 'pending') throw new WingmanError('NOT_FOUND', 'That draft is no longer open')
         const t = await this.d.ai.redo(stored.draft, text)
-        const revised = this.d.drafts.revise(ctx.draftId, stored.draft.kind === 'new' ? t.subject : stored.draft.subject, t.body)
-        if (!revised) throw new WingmanError('NOT_FOUND', 'That draft is no longer open')
-        return { kind: 'draft', draft: revised }
+        const subject = stored.draft.kind === 'new' ? t.subject : stored.draft.subject
+        if (t.to.length === 0) {
+          const revised = this.d.drafts.revise(ctx.draftId, subject, t.body)
+          if (!revised) throw new WingmanError('NOT_FOUND', 'That draft is no longer open')
+          return { kind: 'draft', draft: revised }
+        }
+        // New recipients go through the same name resolution as a fresh email.
+        return this.resolve({
+          id: randomUUID(),
+          kind: 'redo',
+          transcript: text,
+          names: t.to,
+          resolved: [],
+          candidates: [],
+          expires: Date.now() + PENDING_TTL_MS,
+          email: { subject, body: t.body },
+          draftId: ctx.draftId,
+        })
       }
     }
   }
@@ -512,7 +527,8 @@ export class Wingman extends EventEmitter {
   }
 
   private async fromIntent(transcript: string): Promise<VoiceResult> {
-    const intent = await this.d.ai.homeIntent(transcript, this.contacts.topNames(60))
+    // Earlier attempts give the model context ("no, to Priya Patel" after an ambiguous one).
+    const intent = await this.d.ai.homeIntent(transcript, this.contacts.topNames(60), this.recentExchanges(3))
     if (intent.intent === 'unknown') return { kind: 'unknown', hint: intent.hint, transcript }
     const base = { id: randomUUID(), transcript, resolved: [], candidates: [], expires: Date.now() + PENDING_TTL_MS }
     if (intent.intent === 'email') {
@@ -550,6 +566,11 @@ export class Wingman extends EventEmitter {
       p.names.shift()
     }
     this.pending.delete(p.id)
+    if (p.kind === 'redo' && p.email && p.draftId) {
+      const revised = this.d.drafts.revise(p.draftId, p.email.subject, p.email.body, p.resolved)
+      if (!revised) throw new WingmanError('NOT_FOUND', 'That draft is no longer open')
+      return { kind: 'draft', draft: revised }
+    }
     if (p.kind === 'email' && p.email) {
       return {
         kind: 'draft',
@@ -610,6 +631,7 @@ export class Wingman extends EventEmitter {
     if (outcome.already) return { kind, message: `Already ${d.status}` }
     const names = d.to.map(p => firstName(p.name)).join(', ')
     console.log(`[wingman] draft ${d.id} ${d.status}${d.status === 'sent' ? ` to ${d.to.length} recipient(s)` : ''}`)
+    this.agent?.note(`Draft "${d.subject}" to ${d.to.map(p => p.email).join(', ')} was ${d.status === 'sent' ? 'sent' : d.status === 'saved' ? 'saved to Gmail drafts' : 'discarded'} by the user.`)
     return {
       kind,
       message: kind === 'sent' ? `Sent to ${names}` : kind === 'saved' ? 'Saved to Gmail drafts' : 'Draft discarded',
@@ -626,6 +648,7 @@ export class Wingman extends EventEmitter {
     const kind = i.status as DoneKind
     if (outcome.already) return { kind, message: `Already ${i.status}` }
     if (kind === 'created') void this.refresh()
+    this.agent?.note(`Invite "${i.title}" (${i.start}) was ${kind === 'created' ? 'sent' : 'discarded'} by the user.`)
     return {
       kind,
       message: kind === 'created' ? `Invite sent: ${i.title}` : 'Invite discarded',
