@@ -16,9 +16,22 @@ import { WingmanError, type Wingman } from './wingman.ts'
 
 const BUSY_LABEL: Record<VoiceContext['kind'], string> = {
   home: 'Working on it...',
+  chat: 'Thinking...',
   reply: 'Drafting reply...',
   followup: 'Drafting follow-up...',
   redo: 'Revising draft...',
+}
+
+// 16-bit PCM below this is effectively silence (a muted or denied mic sends zeros).
+const SILENT_PEAK = 300
+
+function peakLevel(chunk: Buffer): number {
+  let peak = 0
+  for (let i = 0; i + 1 < chunk.length; i += 2) {
+    const v = Math.abs(chunk.readInt16LE(i))
+    if (v > peak) peak = v
+  }
+  return peak
 }
 
 function classify(err: unknown): { code: ErrorCode; message: string } {
@@ -31,7 +44,7 @@ function classify(err: unknown): { code: ErrorCode; message: string } {
 }
 
 export class Session {
-  private voice: { ctx: VoiceContext; stt: SttSession; bytes: number } | null = null
+  private voice: { ctx: VoiceContext; stt: SttSession; bytes: number; peak: number } | null = null
 
   constructor(
     private readonly ws: WebSocket,
@@ -46,6 +59,7 @@ export class Session {
   onAudio(chunk: Buffer) {
     if (!this.voice) return
     this.voice.bytes += chunk.length
+    this.voice.peak = Math.max(this.voice.peak, peakLevel(chunk))
     this.voice.stt.push(chunk)
   }
 
@@ -81,7 +95,7 @@ export class Session {
       case 'voice.start': {
         this.voice?.stt.cancel()
         const stt = this.sttFor(req.ctx)((final, interim) => this.send({ type: 'transcript', final, interim }))
-        this.voice = { ctx: req.ctx, stt, bytes: 0 }
+        this.voice = { ctx: req.ctx, stt, bytes: 0, peak: 0 }
         return { type: 'ok' }
       }
       case 'voice.stop': {
@@ -95,12 +109,32 @@ export class Session {
           throw new WingmanError('STT', (err as Error).message)
         }
         // Log sizes only: transcripts can contain private details.
-        console.log(`[voice] ${v.ctx.kind}: ${(v.bytes / 32000).toFixed(1)}s audio, ${transcript.length} chars`)
+        const seconds = v.bytes / 32000
+        console.log(`[voice] ${v.ctx.kind}: ${seconds.toFixed(1)}s audio, peak ${v.peak}/32767, ${transcript.length} chars`)
+        if (seconds > 1 && v.peak < SILENT_PEAK) {
+          console.warn('[voice] the audio was silent: the Even app probably lacks microphone permission, or the glasses mic did not open')
+        }
         this.send({ type: 'busy', label: BUSY_LABEL[v.ctx.kind] })
+        if (v.ctx.kind === 'chat') {
+          const reply = await w.chat(transcript, v.ctx.ctx, undefined, label => this.send({ type: 'busy', label }))
+          return { type: 'chat.reply', reply }
+        }
         const result = await w.processVoice(v.ctx, transcript)
         console.log(`[voice] -> ${result.kind}`)
         return { type: 'voice.result', result }
       }
+      case 'chat.send': {
+        this.send({ type: 'busy', label: 'Thinking...' })
+        const reply = await w.chat(req.text, req.ctx, req.pick, label => this.send({ type: 'busy', label }))
+        return { type: 'chat.reply', reply }
+      }
+      case 'chat.history':
+        return { type: 'chat.history', turns: w.chatHistory() }
+      case 'chat.reset':
+        w.chatReset()
+        return { type: 'ok' }
+      case 'action.act':
+        return { type: 'done', ...(await w.actionAct(req.id, req.action === 'approve')) }
       case 'voice.cancel':
         this.close()
         return { type: 'ok' }
