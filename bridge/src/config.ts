@@ -26,6 +26,11 @@ export const config = {
   fakeStt: env.FAKE_STT === '1',
 
   pollMs: Number(env.POLL_SECONDS ?? 180) * 1000,
+
+  // Chat agent.
+  workspaceMcp: env.WORKSPACE_MCP === '1',
+  agentMaxCalls: Number(env.AGENT_MAX_TOOLS ?? 8),
+  chatTurns: Number(env.CHAT_TURNS ?? 20),
 }
 
 export const paths = {
