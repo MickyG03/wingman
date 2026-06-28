@@ -5,13 +5,19 @@ import { PROTOCOL_VERSION, type ClientMessage, type ServerMessage, type VoiceCon
 import { FakeAi } from './ai/fake.ts'
 import { GeminiAi } from './ai/gemini.ts'
 import type { Ai } from './ai/types.ts'
-import { config, paths } from './config.ts'
+import { Agent } from './agent/agent.ts'
+import { GeminiLlm, ScriptedLlm } from './agent/llm.ts'
+import { attachWorkspaceMcp } from './agent/mcp.ts'
+import { config, DATA_DIR, paths } from './config.ts'
 import { DraftStore } from './drafts.ts'
 import { GoogleAuth } from './google/auth.ts'
 import { GoogleCalendar } from './google/calendar.ts'
-import { FakeCalendar, FakeMail } from './google/fake.ts'
+import { GoogleDocs } from './google/docs.ts'
+import { GoogleDrive } from './google/drive.ts'
+import { FakeCalendar, FakeMail, FakeWorkspace } from './google/fake.ts'
 import { GmailMail } from './google/gmail.ts'
 import { GooglePeople } from './google/people.ts'
+import { GoogleSheets } from './google/sheets.ts'
 import { Session } from './session.ts'
 import { deepgramStt } from './stt/deepgram.ts'
 import { fakeStt } from './stt/fake.ts'
@@ -33,9 +39,34 @@ const drafts = new DraftStore(config.fakeGoogle ? null : paths.drafts)
 
 let wingman: Wingman
 const user = () => wingman.userContext()
-const ai: Ai = config.geminiKey ? new GeminiAi(config.geminiKey, config.geminiModel, user, config.timeZone) : new FakeAi(user)
+const ai: Ai = config.geminiKey ? new GeminiAi(config.geminiKey, config.geminiModel, config.geminiFallbackModel, user, config.timeZone) : new FakeAi(user)
 const people = googleAuth ? new GooglePeople(googleAuth) : null
 wingman = new Wingman({ mail, calendar, ai, drafts, googleAuth, people, contactsFile: googleAuth ? paths.contacts : null })
+
+// Chat agent ("Ask Wingman"): Gemini with a manual tool loop, or a scripted
+// stand-in that walks the same tools against the fixtures.
+const workspace = googleAuth ? null : new FakeWorkspace()
+const llm = config.geminiKey ? new GeminiLlm(config.geminiKey, config.geminiModel, config.geminiFallbackModel) : new ScriptedLlm()
+const agent = new Agent({
+  llm,
+  mail,
+  calendar,
+  drive: googleAuth ? new GoogleDrive(googleAuth) : workspace!,
+  docs: googleAuth ? new GoogleDocs(googleAuth) : workspace!,
+  sheets: googleAuth ? new GoogleSheets(googleAuth) : workspace!,
+  contacts: wingman.contactIndex,
+  drafts,
+  host: wingman.host,
+  user,
+  timeZone: config.timeZone,
+  dataDir: googleAuth ? DATA_DIR : null,
+  maxCalls: config.agentMaxCalls,
+  maxTurns: config.chatTurns,
+})
+wingman.attachAgent(agent)
+if (config.workspaceMcp && googleAuth) {
+  attachWorkspaceMcp(googleAuth).then(tools => agent.addTools(tools), err => console.warn(`[mcp] ${(err as Error).message}`))
+}
 
 // A scripted transcript is only safe against demo data: with real Gmail it
 // could draft to a real contact the user never mentioned.
@@ -127,6 +158,7 @@ http.listen(config.port, () => {
   console.log(`[bridge] listening on http://localhost:${config.port} (ws path /ws)`)
   console.log(`[bridge] google: ${config.fakeGoogle ? 'FAKE fixtures (nothing is sent)' : googleAuth?.needed ? 'real, SIGN-IN NEEDED (npm run auth)' : 'real'}`)
   console.log(`[bridge] ai: ${ai.name}`)
+  console.log(`[bridge] agent: ${llm.name}, ${agent.toolNames.length} tools${config.workspaceMcp ? ' + Workspace MCP' : ''}`)
   console.log(`[bridge] speech-to-text: ${useFakeStt ? 'FAKE (scripted)' : config.deepgramKey ? `deepgram ${config.deepgramModel}` : 'OFF (set DEEPGRAM_API_KEY)'}`)
   wingman.start()
 })
