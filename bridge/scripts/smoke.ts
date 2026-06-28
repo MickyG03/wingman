@@ -70,7 +70,9 @@ ws.on('open', async () => {
       ws.send(Buffer.alloc(3200)) // 100 ms of silence, like the simulator
       await new Promise(res => setTimeout(res, 100))
     }
-    let result = (await req({ type: 'voice.stop' })).result
+    const stopped = await req({ type: 'voice.stop' })
+    if (stopped.type !== 'voice.result') throw new Error('expected a voice.result')
+    let result = stopped.result
     if (result.kind === 'contacts') {
       console.log(`\n  "${result.query}" is ambiguous: ${result.candidates.map(c => c.name).join(' | ')}`)
       result = (await req({ type: 'contact.pick', pendingId: result.pendingId, index: 0 })).result
