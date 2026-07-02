@@ -6,8 +6,10 @@ import { getTextWidth, pxTruncate } from '@evenrealities/pretext'
 export const SCREEN_W = 576
 export const LINE_H = 27
 export const PAD = 4
-/** Usable text width inside a full-width container (minus padding and a safety margin). */
-export const TEXT_W = SCREEN_W - 2 * PAD - 8
+/** The icon column on the left of every normal screen (display.ts INSET). */
+export const INSET = 30
+/** Usable text width inside the body (minus the icon column, padding and a safety margin). */
+export const TEXT_W = SCREEN_W - INSET - 2 * PAD - 8
 export const BODY_LINES = 8
 
 export const width = (s: string) => getTextWidth(s)
@@ -70,17 +72,25 @@ export interface ListEntry {
 
 /**
  * Renders entries with a `>` cursor, scrolling so the selected entry stays
- * visible within `maxLines`.
+ * visible within `maxLines`. `entryOfLine` maps each output line to its entry.
  */
-export function renderList(entries: ListEntry[], cursor: number, maxLines = BODY_LINES): string[] {
+export function renderListRows(entries: ListEntry[], cursor: number, maxLines = BODY_LINES, maxPx = TEXT_W): { lines: string[]; entryOfLine: number[] } {
   const blocks = entries.map((e, i) =>
-    e.lines.map((l, j) => (j === 0 ? `${i === cursor ? '>' : '  '} ${truncate(l, TEXT_W - 24)}` : `      ${truncate(l, TEXT_W - 40)}`)),
+    e.lines.map((l, j) => (j === 0 ? `${i === cursor ? '>' : '  '} ${truncate(l, maxPx - 24)}` : `      ${truncate(l, maxPx - 40)}`)),
   )
   // Pick the first entry to show so that the cursor's block fits.
   let start = 0
   const used = (from: number, to: number) => blocks.slice(from, to + 1).reduce((n, b) => n + b.length, 0)
   while (start < cursor && used(start, cursor) > maxLines) start++
-  const out: string[] = []
-  for (let i = start; i < blocks.length && out.length + blocks[i].length <= maxLines; i++) out.push(...blocks[i])
-  return out
+  const lines: string[] = []
+  const entryOfLine: number[] = []
+  for (let i = start; i < blocks.length && lines.length + blocks[i].length <= maxLines; i++) {
+    lines.push(...blocks[i])
+    entryOfLine.push(...blocks[i].map(() => i))
+  }
+  return { lines, entryOfLine }
+}
+
+export function renderList(entries: ListEntry[], cursor: number, maxLines = BODY_LINES, maxPx = TEXT_W): string[] {
+  return renderListRows(entries, cursor, maxLines, maxPx).lines
 }
