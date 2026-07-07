@@ -32,7 +32,7 @@ export class BridgeError extends Error {
 
 const MAX_BACKOFF_MS = 10_000
 // Voice requests wait for speech-to-text plus an AI call.
-const SLOW_REQUESTS = new Set<Request['type']>(['voice.stop', 'draft.fromSuggestion', 'meeting.get', 'email.get', 'draft.act', 'invite.act'])
+const SLOW_REQUESTS = new Set<Request['type']>(['voice.stop', 'draft.fromSuggestion', 'meeting.get', 'email.get', 'draft.act', 'invite.act', 'chat.send', 'action.act'])
 
 export function defaultBridgeUrl(): string {
   const fromEnv = import.meta.env.VITE_BRIDGE_URL as string | undefined
