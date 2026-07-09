@@ -3,16 +3,30 @@ import { AudioInputSource, type EvenAppBridge, type EvenHubEvent } from '@evenre
 // audioControl(true) reports success even when mic permission is denied, so a
 // silent mic is detected by counting frames instead.
 const SILENCE_WATCHDOG_MS = 1500
+const LEVEL_EVERY_MS = 120
+
+/** Peak sample level of a PCM s16le chunk, 0..1. */
+export function peakLevel(pcm: Uint8Array): number {
+  let peak = 0
+  for (let i = 0; i + 1 < pcm.length; i += 2) {
+    const v = (pcm[i] | (pcm[i + 1] << 8)) << 16 >> 16
+    const a = v < 0 ? -v : v
+    if (a > peak) peak = a
+  }
+  return peak / 32767
+}
 
 export class Mic {
   private on = false
   private frames = 0
   private watchdog: number | null = null
+  private lastLevelAt = 0
 
   constructor(
     private readonly bridge: EvenAppBridge,
     private readonly onPcm: (pcm: Uint8Array) => void,
     private readonly onSilent: () => void,
+    private readonly onLevel: (level: number) => void,
   ) {}
 
   async start() {
@@ -39,5 +53,10 @@ export class Mic {
     if (!pcm || !this.on) return
     this.frames++
     this.onPcm(pcm)
+    const now = Date.now()
+    if (now - this.lastLevelAt >= LEVEL_EVERY_MS) {
+      this.lastLevelAt = now
+      this.onLevel(peakLevel(pcm))
+    }
   }
 }
