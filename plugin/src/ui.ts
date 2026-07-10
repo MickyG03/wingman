@@ -3,12 +3,13 @@
 // the simulator, where long-press isn't available.
 
 import type { Gesture } from './glasses/input'
+import type { ChatTurn } from '../../shared/protocol'
 import type { Frame } from './render/screens'
 
 type Status = 'connecting' | 'ready' | 'error'
 
 let statusEl: HTMLDivElement
-let mirrorEls: Record<keyof Frame, HTMLDivElement>
+let mirrorEls: Record<'header' | 'body' | 'footer', HTMLDivElement>
 
 export function mountUi(onGesture: (g: Gesture) => void) {
   const app = document.querySelector<HTMLDivElement>('#app')!
@@ -30,6 +31,7 @@ export function mountUi(onGesture: (g: Gesture) => void) {
         <button data-g="double">Back</button>
         <button id="talk" class="talk">Hold to talk</button>
       </section>
+      <section id="chat" class="chat" aria-label="Conversation"></section>
       <footer>Ring or temple: swipe to move, tap to open, hold to talk, double-tap to go back.</footer>
     </main>
   `
@@ -70,9 +72,31 @@ export function setStatus(kind: Status, text: string) {
   statusEl.textContent = text
 }
 
+/** Full conversation under the mirror, newest last. */
+export function showChat(turns: ChatTurn[] | null) {
+  const el = document.querySelector<HTMLDivElement>('#chat')
+  if (!el) return
+  el.replaceChildren(
+    ...(turns ?? []).slice(-12).flatMap(t => {
+      const you = document.createElement('div')
+      you.className = 'you'
+      you.textContent = t.heard || '(tapped)'
+      const bot = document.createElement('div')
+      bot.className = 'bot'
+      bot.textContent = t.reply.text + (t.reply.pending ? `  [${t.reply.pending.label}]` : '')
+      return [you, bot]
+    }),
+  )
+  el.scrollTop = el.scrollHeight
+}
+
 export function mirror(frame: Frame) {
   if (!mirrorEls) return
-  for (const k of Object.keys(mirrorEls) as (keyof Frame)[]) mirrorEls[k].textContent = frame[k]
+  mirrorEls.header.textContent = frame.header
+  mirrorEls.body.textContent = frame.layout === 'chat' && frame.you?.trim() ? `${frame.you}
+
+${frame.body}` : frame.layout === 'game' ? '(game is drawn on the glasses)' : frame.body
+  mirrorEls.footer.textContent = frame.footer
 }
 
 function injectStyles() {
@@ -105,6 +129,10 @@ function injectStyles() {
     .controls .talk { grid-column: 1 / -1; padding: 18px 0; color: #3CFA44; border-color: #3CFA44;
       user-select: none; -webkit-user-select: none; }
     .controls .talk.active { background: rgba(60,250,68,0.15); }
+    .chat { display: flex; flex-direction: column; gap: 6px; max-height: 40vh; overflow: auto; }
+    .chat:empty { display: none; }
+    .chat .you { align-self: flex-end; background: #3E3E3E; border-radius: 14px 14px 2px 14px; padding: 8px 12px; max-width: 85%; }
+    .chat .bot { align-self: flex-start; background: rgba(60,250,68,0.10); border: 1px solid rgba(60,250,68,0.3); border-radius: 14px 14px 14px 2px; padding: 8px 12px; max-width: 85%; white-space: pre-wrap; }
     footer { font-size: 12px; color: #7B7B7B; text-align: center; }
   `
   const style = document.createElement('style')
