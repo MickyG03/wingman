@@ -542,7 +542,7 @@ export function reduce(s: State, a: Action): Step {
     case 'tick': {
       let next: State = { ...s, now: a.now }
       const sc = top(next)
-      if (sc.name === 'result' && a.now >= sc.until) return step(pop(next), [req({ type: 'home.get' })])
+      if (sc.name === 'result' && sc.until !== null && a.now >= sc.until) return step(pop(next), [req({ type: 'home.get' })])
       // Meeting nudge: jump the home cursor to a meeting that's about to start.
       const m = next.home?.nextMeeting
       if (m && sc.name === 'home' && m.id !== next.nudgedMeetingId && Date.parse(m.start) - a.now < NUDGE_MS) {
@@ -565,6 +565,7 @@ export function reduce(s: State, a: Action): Step {
       // Reload whatever the current screen was waiting for.
       const sc = top(next)
       if (sc.name === 'inbox') effects.push(req({ type: 'inbox.get' }))
+      if (next.stack.some(x => x.name === 'chat')) effects.push(req({ type: 'chat.history' }))
       if (sc.name === 'email' && !sc.email) effects.push(req({ type: 'email.get', id: sc.id }))
       if (sc.name === 'meeting' && !sc.data) effects.push(req({ type: 'meeting.get', eventId: sc.id }))
       return step(next, effects)
@@ -573,6 +574,23 @@ export function reduce(s: State, a: Action): Step {
     case 'gesture':
       // Timing guards need the gesture's own time, not the last 1 s tick.
       return onGesture({ ...s, now: a.now }, a.gesture)
+
+    case 'micLevel':
+      return step(top(s).name === 'dictate' ? { ...s, micLevel: a.level } : s)
+
+    case 'gameTick': {
+      const sc = top(s)
+      if (sc.name !== 'game') return step(s)
+      const dino = dinoTick(sc.dino, a.dt)
+      const effects: Effect[] = dino.over && !sc.dino.over && dino.best > s.dinoBest ? [{ kind: 'saveBest', best: dino.best }] : []
+      return step(updateTop({ ...s, dinoBest: Math.max(s.dinoBest, dino.best) }, { dino }), effects)
+    }
+
+    case 'dinoBest':
+      return step({ ...s, dinoBest: Math.max(s.dinoBest, a.best) })
+
+    case 'gameFps':
+      return step({ ...s, gameFps: a.fps })
 
     case 'micSilent': {
       const sc = top(s)
@@ -588,7 +606,8 @@ export function reduce(s: State, a: Action): Step {
         case 'busy':
           return step(sc.name === 'thinking' ? updateTop(s, { label: m.label }) : s)
         case 'changed':
-          if (m.what === 'home') return step(s, [req({ type: 'home.get' })])
+          // Another client (phone page, a second pair of glasses) may have chatted: refresh the view too.
+          if (m.what === 'home') return step(s, [req({ type: 'home.get' }), ...(s.stack.some(x => x.name === 'chat') ? [req({ type: 'chat.history' })] : [])])
           return step(s, s.inbox || sc.name === 'inbox' ? [req({ type: 'inbox.get' })] : [])
         case 'auth.needed':
           return step(sc.name === 'auth' ? s : push(s, { name: 'auth', waiting: false }))
