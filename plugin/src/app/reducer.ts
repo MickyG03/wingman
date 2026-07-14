@@ -386,7 +386,10 @@ function tap(s: State): Step {
       )
     }
     case 'result':
+      if (sc.retry) return startVoice(pop(s), sc.retry, 'toggle')
       return step(pop(s), [req({ type: 'home.get' })])
+    case 'recent':
+      return step(s)
     case 'auth':
       return sc.waiting ? step(s) : step(updateTop(s, { waiting: true }), [req({ type: 'auth.start' })])
     case 'thinking':
@@ -402,6 +405,13 @@ function onGesture(s: State, g: Gesture): Step {
 
   if (s.conn !== 'ready') return g === 'double' ? step(s, [{ kind: 'exit' }]) : step(s)
 
+  if (sc.name === 'game') {
+    if (g === 'up' || g === 'tap') return step(updateTop(s, { dino: jump(sc.dino) }))
+    if (g === 'down') return step(updateTop(s, { dino: duck(sc.dino) }))
+    if (g === 'double') return step(pop({ ...s, dinoBest: Math.max(s.dinoBest, sc.dino.best, sc.dino.score) }), [{ kind: 'saveBest', best: Math.max(s.dinoBest, sc.dino.best, sc.dino.score) }])
+    return step(s)
+  }
+
   switch (g) {
     case 'up':
       return step(move(s, -1))
@@ -415,7 +425,7 @@ function onGesture(s: State, g: Gesture): Step {
       // Coming back home: refresh so new pending drafts and read counts show.
       return step(pop(s), top(pop(s)).name === 'home' ? [req({ type: 'home.get' })] : [])
     case 'holdStart': {
-      const ctx = voiceContextFor(sc)
+      const ctx = voiceContextFor(sc, s)
       return ctx ? startVoice(s, ctx, 'hold') : step(s)
     }
     case 'holdEnd': {
@@ -434,16 +444,25 @@ function showVoiceResult(s: State, r: VoiceResult): State {
     case 'contacts':
       return push(s, { name: 'contacts', pendingId: r.pendingId, query: r.query, candidates: r.candidates, cursor: 0 })
     case 'unknown':
-      return result(s, r.transcript ? `${r.hint}\n\nHeard: "${r.transcript}"` : r.hint, false)
+      return result(s, r.transcript ? `${r.hint}\n\nHeard: "${r.transcript}"` : r.hint, false, retryContext(s))
   }
+}
+
+/** The voice context to retry with: whatever the thinking screen on top was started for. */
+function retryContext(s: State): VoiceContext | undefined {
+  const dictateCtx = s.lastVoiceCtx
+  return dictateCtx ?? undefined
 }
 
 /** Keeps list cursors on a real row after the data under them shrinks. */
 function clampCursors(s: State): State {
   const stack = s.stack.map(sc => {
-    if (sc.name !== 'home' && sc.name !== 'inbox') return sc
-    const max = Math.max(0, listLength(sc, s) - 1)
-    return sc.cursor > max ? { ...sc, cursor: max } : sc
+    if ('cursor' in sc && sc.name !== 'menu' && sc.name !== 'contacts') {
+      const max = Math.max(0, listLength(sc, s) - 1)
+      return sc.cursor > max ? { ...sc, cursor: max } : sc
+    }
+    if (sc.name === 'chat') return { ...sc, page: Math.min(sc.page, Math.max(0, chatPages(s.chat ?? []).length - 1)) }
+    return sc
   })
   return { ...s, stack }
 }
@@ -475,6 +494,11 @@ function onResponse(s: State, res: ResponseMap[Request['type']], token?: number)
     case 'voice.result':
       if (!awaiting(s, token)) return step(s) // user cancelled; the draft stays pending on home
       return step(showVoiceResult(pop(s), res.result))
+    case 'chat.reply':
+      if (!awaiting(s, token)) return step({ ...s, chat: [...(s.chat ?? []), { id: res.reply.turnId, at: new Date(s.now).toISOString(), heard: '', reply: res.reply }] })
+      return step(showChatReply(s, res.reply))
+    case 'chat.history':
+      return step(clampCursors({ ...s, chat: res.turns }))
     case 'done': {
       if (!awaiting(s, token)) return step(s, [req({ type: 'home.get' })])
       return step(result(popTransient(s), res.message, true), [req({ type: 'home.get' })])
