@@ -1,15 +1,43 @@
-// Pure rendering: state → the three text areas on the glasses.
+// Pure rendering: state → what the glasses show.
 
-import type { Draft, EmailDetail, InviteDraft, Meeting, Briefing } from '../../../shared/protocol'
+import type { Briefing, ChatTurn, Draft, EmailDetail, InviteDraft, Meeting } from '../../../shared/protocol'
 import { homeEntries } from '../app/home'
 import { top, type State } from '../app/state'
+import { draw as drawDino } from '../game/dino'
+import type { IconName } from '../glasses/icons'
 import { age, clock, firstName, names, relative, whenRange } from './format'
-import { BODY_LINES, paginate, renderList, spread, truncate, wrap } from './text'
+import { BODY_LINES, paginate, renderList, renderListRows, spread, TEXT_W, truncate, wrap } from './text'
+
+/** Which page layout the display should use (see glasses/display.ts). */
+export type Layout = 'default' | 'chat' | 'game'
 
 export interface Frame {
+  layout: Layout
   header: string
   body: string
   footer: string
+  /** chat layout: the dim "You: ..." area above the reply. */
+  you?: string
+  /** default layout: an icon per body line (null = none). */
+  icons?: (IconName | null)[]
+  /** game layout: draws the play area. */
+  draw?: (ctx: CanvasRenderingContext2D, w: number, h: number) => void
+  /** game layout: identity of the state drawn, so unchanged frames are not re-sent. */
+  gameState?: object
+}
+
+type Partial = Omit<Frame, 'layout'> & { layout?: Layout }
+
+/** Reply lines per chat page (the dim "You:" area takes two). */
+export const CHAT_LINES = 6
+
+/** A small level meter for the listening header. */
+export function meter(level: number, bars = 6): string {
+  const glyphs = '▁▂▃▄▅▆▇█'
+  const filled = Math.round(Math.min(1, level * 1.6) * bars)
+  let out = ''
+  for (let i = 0; i < bars; i++) out += i < filled ? glyphs[Math.min(7, 2 + Math.floor((i / bars) * 6))] : '▁'
+  return out
 }
 
 // ── Paged content (also used by the reducer to clamp page numbers) ──────
@@ -66,6 +94,53 @@ function compact(text: string): string[] {
   return wrap(text).filter(l => l.trim() !== '')
 }
 
+// ── Chat ────────────────────────────────────────────────────────────────
+
+export interface ChatPage {
+  turnId: string
+  /** What the user said, for the dim area (two lines max). */
+  you: string
+  lines: string[]
+}
+
+function cardHint(turn: ChatTurn): string {
+  const { card, pending } = turn.reply
+  if (pending) return `▶ ${pending.label}  -  tap to review`
+  if (!card) return ''
+  switch (card.kind) {
+    case 'list':
+      return `▶ ${card.title} (${card.items.length})  -  tap to open`
+    case 'text':
+      return `▶ ${truncate(card.title, TEXT_W - 160)}  -  tap to read`
+    case 'draft':
+    case 'invite':
+    case 'edit':
+      return '▶ tap to review'
+  }
+}
+
+/** Wingman's reply plus a hint for its card, as glasses lines. */
+function turnLines(turn: ChatTurn): string[] {
+  const hint = cardHint(turn)
+  return [...compact(turn.reply.text), ...(hint ? [truncate(hint)] : [])]
+}
+
+/** The whole conversation paginated, oldest first, each page tagged with its turn. */
+export function chatPages(turns: ChatTurn[]): ChatPage[] {
+  const pages: ChatPage[] = []
+  for (const turn of turns) {
+    const you = turn.heard ? wrap(`You: ${turn.heard}`).slice(0, 2).join('\n') : ''
+    for (const lines of paginate(turnLines(turn), CHAT_LINES)) pages.push({ turnId: turn.id, you, lines })
+  }
+  return pages
+}
+
+export function textPages(turn: ChatTurn): string[][] {
+  const card = turn.reply.card
+  if (card?.kind !== 'text') return [[]]
+  return paginate([...wrap(card.title), ...compact(card.text)])
+}
+
 function pageTag(page: number, total: number): string {
   return total > 1 ? `${page + 1}/${total}` : ''
 }
@@ -78,6 +153,11 @@ function centered(lines: string[]): string {
 // ── Screens ─────────────────────────────────────────────────────────────
 
 export function render(s: State): Frame {
+  const f = renderScreen(s)
+  return { ...f, layout: f.layout ?? 'default' }
+}
+
+function renderScreen(s: State): Partial {
   const now = s.now
   const time = clock(now)
 
