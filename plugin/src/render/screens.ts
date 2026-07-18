@@ -175,11 +175,15 @@ function renderScreen(s: State): Partial {
   switch (sc.name) {
     case 'home': {
       const entries = homeEntries(s.home, now)
-      const body = s.home ? renderList(entries, sc.cursor) : [s.homeError ? `Couldn't load: ${s.homeError}` : 'Loading...']
+      const rows = s.home ? renderListRows(entries, sc.cursor) : null
+      const body = rows ? rows.lines : [s.homeError ? `Couldn't load: ${s.homeError}` : 'Loading...']
+      // An icon on the first line of each entry; continuation lines stay blank.
+      const icons = rows ? rows.entryOfLine.map((e, i) => (i === 0 || rows.entryOfLine[i - 1] !== e ? entries[e].icon : null)) : []
       return {
-        header: spread(s.fake ? 'Wingman (demo data)' : 'Wingman', time),
+        header: spread(s.fake ? 'Wingman  (demo data)' : 'Wingman', time),
         body: body.join('\n'),
-        footer: 'tap: open   hold: speak   double-tap: exit',
+        footer: 'tap: open   hold: ask   double-tap: exit',
+        icons,
       }
     }
 
@@ -231,14 +235,32 @@ function renderScreen(s: State): Partial {
       const text = [sc.final, sc.interim].filter(Boolean).join(' ')
       const lines = text ? wrap(text) : [sc.micWarning ? 'No audio from the mic yet...' : 'Speak now...']
       return {
-        header: spread(`Listening: ${sc.label}`, '●'),
+        header: spread(`Listening: ${sc.label}`, `${meter(s.micLevel)} ●`),
         body: lines.slice(-BODY_LINES).join('\n'),
         footer: sc.mode === 'hold' ? 'release: done   double-tap: cancel' : 'tap: done   double-tap: cancel',
       }
     }
 
-    case 'thinking':
-      return { header: spread('Wingman', time), body: centered([sc.label]), footer: 'double-tap: cancel' }
+    case 'thinking': {
+      const lines = sc.heard ? [...wrap(`Heard: "${sc.heard}"`).slice(0, 5), '', sc.label] : [sc.label]
+      return { header: spread('Wingman', time), body: sc.heard ? lines.join('\n') : centered(lines), footer: 'double-tap: cancel' }
+    }
+
+    case 'recent': {
+      const items = s.home?.recent ?? []
+      const body = items.length
+        ? renderList(
+            items.map(r => ({
+              lines: [
+                `${age(r.at, now)}  "${r.heard || '(nothing heard)'}"`,
+                `${r.outcome === 'draft' || r.outcome === 'invite' ? '' : r.outcome === 'error' ? 'Error: ' : ''}${r.detail}`,
+              ],
+            })),
+            sc.cursor,
+          )
+        : ['Nothing yet. Hold to talk from home.']
+      return { header: spread('Recent voice requests', time), body: body.join('\n'), footer: 'swipe: scroll   double-tap: back' }
+    }
 
     case 'contacts':
       return {
@@ -266,8 +288,71 @@ function renderScreen(s: State): Partial {
       }
     }
 
-    case 'result':
-      return { header: spread('Wingman', time), body: centered(wrap(`${sc.ok ? '' : '! '}${sc.message}`)), footer: 'tap: ok' }
+    case 'chat': {
+      const pages = chatPages(s.chat ?? [])
+      if (pages.length === 0) {
+        return {
+          header: spread('Ask Wingman', time),
+          body: centered(s.chat === null ? ['Loading...'] : ['Hold to talk, or tap.', '', 'Try: "what is unread",', '"find the offsite budget",', '"lunch with Sam Thursday".']),
+          footer: 'tap: ask   hold: talk   double-tap: back',
+        }
+      }
+      const page = pages[Math.min(sc.page, pages.length - 1)]
+      const hasCard = !!s.chat?.find(t => t.id === page.turnId)?.reply.card
+      return {
+        layout: 'chat',
+        header: spread('Ask Wingman', pageTag(Math.min(sc.page, pages.length - 1), pages.length) || time),
+        you: page.you || ' ',
+        body: page.lines.join('\n'),
+        footer: `${hasCard ? 'tap: open' : 'tap: ask'}   hold: talk   swipe: page`,
+      }
+    }
+
+    case 'game':
+      return {
+        layout: 'game',
+        header: spread(`Dino run${s.gameFps ? `   ${s.gameFps.toFixed(0)} fps` : ''}`, `score ${sc.dino.score}   best ${Math.max(sc.dino.best, s.dinoBest)}`),
+        body: ' ',
+        footer: 'tap / swipe up: jump   swipe down: duck   double-tap: quit',
+        draw: ctx => drawDino(ctx, sc.dino),
+        gameState: sc.dino,
+      }
+
+    case 'card': {
+      const card = s.chat?.find(t => t.id === sc.turnId)?.reply.card
+      const items = card?.kind === 'list' ? card.items : []
+      return {
+        header: truncate(card?.kind === 'list' ? card.title : 'Items'),
+        body: items.length ? renderList(items.map(i => ({ lines: i.detail ? [i.title, i.detail] : [i.title] })), sc.cursor).join('\n') : 'Nothing here.',
+        footer: 'tap: open   hold: ask   double-tap: back',
+      }
+    }
+
+    case 'textCard': {
+      const turn = s.chat?.find(t => t.id === sc.turnId)
+      const pages = turn ? textPages(turn) : [[]]
+      const card = turn?.reply.card
+      return {
+        header: spread(truncate(card?.kind === 'text' ? card.title : 'Text', TEXT_W - 60), pageTag(sc.page, pages.length)),
+        body: pages[Math.min(sc.page, pages.length - 1)].join('\n'),
+        footer: 'swipe: page   hold: ask   double-tap: back',
+      }
+    }
+
+    case 'approval': {
+      const pages = paginate(sc.lines.flatMap(l => wrap(l)))
+      return {
+        header: spread('Approve?', pageTag(sc.page, pages.length)),
+        body: pages[Math.min(sc.page, pages.length - 1)].join('\n'),
+        footer: 'tap: approve / discard   double-tap: back',
+      }
+    }
+
+    case 'result': {
+      const lines = wrap(`${sc.ok ? '' : '! '}${sc.message}`).slice(0, BODY_LINES)
+      const footer = sc.retry ? 'tap: try again   double-tap: back' : sc.until === null ? 'tap: ok   double-tap: back' : 'tap: ok'
+      return { header: spread('Wingman', time), body: sc.ok ? centered(lines) : lines.join('\n'), footer }
+    }
 
     case 'auth':
       return {
