@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { Draft, EmailDetail, HomeData } from '../../shared/protocol'
+import type { ChatReply, Draft, EmailDetail, HomeData } from '../../shared/protocol'
 import { reduce } from '../src/app/reducer'
 import type { Gesture } from '../src/glasses/input'
 import { initialState, top, type Action, type State } from '../src/app/state'
@@ -17,6 +17,8 @@ const home: HomeData = {
   importantUnread: 1,
   pendingDrafts: [],
   pendingInvites: [],
+  pendingActions: [],
+  recent: [],
 }
 
 const email: EmailDetail = {
