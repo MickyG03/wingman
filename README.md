@@ -7,6 +7,7 @@ A meeting and inbox copilot for Even Realities G2 smart glasses.
 - **Replies and new emails by voice**: "Thursday works, see you at 12:30" on an email, or "Email Priya that I'm running ten minutes late" from home. Gemini writes the draft.
 - **Meeting follow-ups** by voice, sent to everyone who attended.
 - **Calendar invites** by voice: "Lunch with Sam Thursday at 1".
+- **Ask Wingman**, a conversation: "what's unread", "open the second one", "reply saying yes", "find the offsite budget sheet", "add a row: Vineyard, 12000", "what's in the launch plan doc", "when am I free tomorrow", "who is Priya". It remembers the conversation, so "that one" and "the second one" work. Gemini chooses from 22 tools over Gmail, Calendar, Contacts, Drive, Docs and Sheets; Google's Workspace MCP servers can be attached on top (`WORKSPACE_MCP=1`).
 
 Nothing is sent without your confirmation. Every draft and invite opens for review and only goes out when you pick **Send** (or **Save to Gmail drafts**). Each draft can be sent at most once.
 
@@ -32,7 +33,7 @@ G2 glasses + R1 ring ⇄ BLE ⇄ Even app WebView [plugin/]
 |---|---|
 | Swipe | Move the cursor, or turn the page |
 | Tap | Open the item, or open actions (reply, send, ...) |
-| Hold | Talk: on home, a new email or invite; on an email, a reply; on a meeting, a follow-up; on a draft, changes to it. Release to finish. |
+| Hold | Talk: on home, the inbox or the chat, ask Wingman anything; on an email, a reply; on a meeting, a follow-up; on a draft, changes to it. Release to finish. |
 | Double-tap | Back (exits from home) |
 
 The phone screen mirrors the glasses and has the same buttons, including **Hold to talk**.
@@ -58,7 +59,7 @@ Set `FAKE_GOOGLE=1` in `bridge/.env` to try everything on demo data first. No ac
 
 ### 2. Google (Gmail + Calendar)
 
-1. In the [Google Cloud console](https://console.cloud.google.com/), create a project and enable the **Gmail API** and **Google Calendar API**.
+1. In the [Google Cloud console](https://console.cloud.google.com/), create a project and enable the **Gmail**, **Google Calendar**, **People**, **Google Drive**, **Google Docs** and **Google Sheets** APIs.
 2. Under **OAuth consent screen**, choose External, leave it in **Testing**, and add your Google address as a test user.
 3. Under **Credentials**, create an **OAuth client ID** of type **Desktop app**. Download the JSON and save it as `bridge/.data/google-client.json`.
 4. Set `FAKE_GOOGLE=0` in `bridge/.env`, then sign in. This opens your browser:
@@ -107,10 +108,15 @@ At hub.evenrealities.com, open **Projects → Wingman**, upload the build and ma
 ## Test
 
 ```bash
-cd bridge && npm test           # unit tests: MIME, contacts, AI output validation, send-once drafts
-cd plugin && npm test           # reducer flows and text layout
-cd bridge && npm run smoke      # every flow end to end over the WebSocket (needs FAKE_GOOGLE=1)
+cd bridge && npm test           # unit tests: MIME, contacts, AI output validation, send-once drafts, the agent loop
+cd plugin && npm test           # reducer flows, chat screens and text layout
+cd bridge && npm run smoke      # every voice flow end to end over the WebSocket (needs FAKE_GOOGLE=1)
+cd bridge && npm run chat -- "what is unread"      # talk to the agent from the terminal (fake data unless ALLOW_REAL=1)
 ```
+
+## How the agent stays safe
+
+Every tool that changes something (send, create event, edit a doc, append rows, MCP mutations) only *prepares* the action: the glasses show a preview and nothing runs until you tap **Approve**. Each prepared action runs at most once. The model can only use ids that came back from its own tool results, so it can't invent an email or file to act on. Email and document contents are passed to the model as data, with instructions to ignore anything inside them that looks like a command.
 
 ## Privacy
 
