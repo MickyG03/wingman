@@ -41,6 +41,11 @@ export interface CalendarPort {
   create(invite: InviteDraft): Promise<{ id: string }>
 }
 
+export interface ContactsPort {
+  /** Saved contacts and auto-saved correspondents. */
+  list(): Promise<Person[]>
+}
+
 /** Thrown when Google credentials are missing, expired or revoked. */
 export class AuthNeededError extends Error {
   constructor(message = 'Google sign-in needed') {

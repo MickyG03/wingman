@@ -3,6 +3,8 @@
 
 import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
+import fs from 'node:fs'
+import path from 'node:path'
 import type {
   Briefing,
   DoneKind,
@@ -24,7 +26,7 @@ import { ContactIndex } from './contacts.ts'
 import type { DraftMeta, DraftStore } from './drafts.ts'
 import { runAuthFlow, type GoogleAuth } from './google/auth.ts'
 import { buildMime, replySubject } from './google/mime.ts'
-import { AuthNeededError, type CalendarPort, type MailPort, type RawEmail } from './google/ports.ts'
+import { AuthNeededError, type CalendarPort, type ContactsPort, type MailPort, type RawEmail } from './google/ports.ts'
 
 export class WingmanError extends Error {
   constructor(
@@ -54,11 +56,14 @@ export interface WingmanDeps {
   ai: Ai
   drafts: DraftStore
   googleAuth: GoogleAuth | null // null in fake mode
+  people: ContactsPort | null // null in fake mode
+  contactsFile: string | null
 }
 
 const PENDING_TTL_MS = 10 * 60_000
 const INBOX_FETCH = 25
 const INBOX_SHOW = 20
+const CONTACTS_MAX_AGE_MS = 12 * 3_600_000
 
 export class Wingman extends EventEmitter {
   private readonly contacts = new ContactIndex()
@@ -77,7 +82,11 @@ export class Wingman extends EventEmitter {
     d.googleAuth?.on('needed', () => this.emit('auth.needed'))
     d.googleAuth?.on('restored', () => {
       this.loaded = this.load()
-      this.loaded.then(() => this.emit('changed', 'home')).catch(() => {})
+      // A new sign-in may have granted the contacts scope: rebuild the index.
+      this.loaded.then(() => {
+        this.emit('changed', 'home')
+        void this.loadContacts()
+      }).catch(() => {})
     })
   }
 
@@ -100,8 +109,30 @@ export class Wingman extends EventEmitter {
     const profile = await this.d.mail.profile()
     this.self = { name: config.userName || profile.name || profile.email.split('@')[0], email: profile.email }
     this.contacts.setSelf(profile.email)
+    const cachedAt = this.loadContactsCache()
     await this.refresh()
-    void this.loadContacts()
+    if (Date.now() - cachedAt > CONTACTS_MAX_AGE_MS) void this.loadContacts()
+  }
+
+  /** Loads the saved contact index; returns when it was saved (0 if none). */
+  private loadContactsCache(): number {
+    const file = this.d.contactsFile
+    if (!file || !fs.existsSync(file)) return 0
+    try {
+      const data = JSON.parse(fs.readFileSync(file, 'utf8')) as { savedAt: number; entries: Parameters<ContactIndex['load']>[0] }
+      this.contacts.load(data.entries ?? [])
+      console.log(`[wingman] contact index: ${this.contacts.size} people (cached)`)
+      return data.savedAt ?? 0
+    } catch {
+      return 0
+    }
+  }
+
+  private saveContactsCache() {
+    const file = this.d.contactsFile
+    if (!file) return
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, JSON.stringify({ savedAt: Date.now(), entries: this.contacts.toJSON() }))
   }
 
   private async ready() {
@@ -115,18 +146,50 @@ export class Wingman extends EventEmitter {
     }
   }
 
-  private async loadContacts() {
-    try {
-      const headers = await this.d.mail.recentHeaders(300)
-      for (const m of headers) {
-        const t = Date.parse(m.date)
-        for (const p of [m.from, ...m.to, ...m.cc]) this.contacts.add(p, t)
+  /**
+   * Builds the contact index: Google Contacts + "Other contacts" when that
+   * scope was granted, else (or additionally) headers of recent mail.
+   */
+  private async loadContacts(attempt = 1) {
+    if (this.d.people) {
+      try {
+        const now = Date.now()
+        for (const p of await this.d.people.list()) this.contacts.add(p, now - 30 * 86_400_000)
+        this.saveContactsCache()
+        console.log(`[wingman] contact index: ${this.contacts.size} people (Google Contacts)`)
+        return
+      } catch (err) {
+        if (err instanceof AuthNeededError) return
+        const msg = (err as Error).message
+        console.warn(
+          /insufficient|scope|permission/i.test(msg)
+            ? '[wingman] contacts permission not granted yet: run `npm run auth` again to allow it. Using recent mail instead.'
+            : `[wingman] Google Contacts failed (${msg}); using recent mail instead.`,
+        )
       }
-      for (const e of this.events) for (const p of e.attendees) this.contacts.add(p, Date.parse(e.start))
-      console.log(`[wingman] contact index: ${this.contacts.size} people`)
-    } catch (err) {
-      console.warn(`[wingman] contacts failed: ${(err as Error).message}`)
     }
+    try {
+      const headers = await this.d.mail.recentHeaders(150)
+      for (const m of headers) this.contacts.addMessage(m.id, [m.from, ...m.to, ...m.cc], Date.parse(m.date))
+      this.saveContactsCache()
+      console.log(`[wingman] contact index: ${this.contacts.size} people (recent mail)`)
+    } catch (err) {
+      const msg = (err as Error).message
+      if (/quota|rate limit/i.test(msg) && attempt < 4) {
+        console.warn(`[wingman] Gmail quota hit while indexing contacts; retrying in ${90 * attempt}s`)
+        setTimeout(() => void this.loadContacts(attempt + 1), 90_000 * attempt).unref()
+      } else {
+        console.warn(`[wingman] contacts failed: ${msg}`)
+      }
+    }
+  }
+
+  /** Learns correspondents from data we already fetched (no extra API calls). */
+  private learnContacts() {
+    let added = false
+    for (const m of this.inbox) added = this.contacts.addMessage(m.id, [m.from, ...m.to, ...m.cc], Date.parse(m.date)) || added
+    for (const e of this.events) added = this.contacts.addMessage(`event:${e.id}`, e.attendees, Date.parse(e.start)) || added
+    if (added) this.saveContactsCache()
   }
 
   async refresh() {
@@ -135,6 +198,7 @@ export class Wingman extends EventEmitter {
       const [events, inbox] = await Promise.all([this.d.calendar.upcoming(7), this.d.mail.listInbox(INBOX_FETCH)])
       this.events = events
       this.inbox = inbox
+      this.learnContacts()
       const sig = JSON.stringify([events.map(e => [e.id, e.start]), inbox.map(m => [m.id, m.unread])])
       if (sig !== this.signature) {
         this.signature = sig

@@ -97,7 +97,9 @@ export class Session {
         // Log sizes only: transcripts can contain private details.
         console.log(`[voice] ${v.ctx.kind}: ${(v.bytes / 32000).toFixed(1)}s audio, ${transcript.length} chars`)
         this.send({ type: 'busy', label: BUSY_LABEL[v.ctx.kind] })
-        return { type: 'voice.result', result: await w.processVoice(v.ctx, transcript) }
+        const result = await w.processVoice(v.ctx, transcript)
+        console.log(`[voice] -> ${result.kind}`)
+        return { type: 'voice.result', result }
       }
       case 'voice.cancel':
         this.close()

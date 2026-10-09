@@ -9,9 +9,12 @@ import { DATA_DIR, paths } from '../config.ts'
 import { AuthNeededError } from './ports.ts'
 
 // gmail.modify covers reading, marking read, drafts and sending with one consent.
+// The two contacts scopes are read-only and resolve spoken names to addresses.
 export const SCOPES = [
   'https://www.googleapis.com/auth/gmail.modify',
   'https://www.googleapis.com/auth/calendar.events',
+  'https://www.googleapis.com/auth/contacts.readonly',
+  'https://www.googleapis.com/auth/contacts.other.readonly',
 ]
 
 export type OAuth2Client = InstanceType<typeof auth.OAuth2>

@@ -11,6 +11,7 @@ import { GoogleAuth } from './google/auth.ts'
 import { GoogleCalendar } from './google/calendar.ts'
 import { FakeCalendar, FakeMail } from './google/fake.ts'
 import { GmailMail } from './google/gmail.ts'
+import { GooglePeople } from './google/people.ts'
 import { Session } from './session.ts'
 import { deepgramStt } from './stt/deepgram.ts'
 import { fakeStt } from './stt/fake.ts'
@@ -33,7 +34,8 @@ const drafts = new DraftStore(config.fakeGoogle ? null : paths.drafts)
 let wingman: Wingman
 const user = () => wingman.userContext()
 const ai: Ai = config.geminiKey ? new GeminiAi(config.geminiKey, config.geminiModel, user, config.timeZone) : new FakeAi(user)
-wingman = new Wingman({ mail, calendar, ai, drafts, googleAuth })
+const people = googleAuth ? new GooglePeople(googleAuth) : null
+wingman = new Wingman({ mail, calendar, ai, drafts, googleAuth, people, contactsFile: googleAuth ? paths.contacts : null })
 
 // A scripted transcript is only safe against demo data: with real Gmail it
 // could draft to a real contact the user never mentioned.

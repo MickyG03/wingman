@@ -43,10 +43,29 @@ export function nameTier(query: string, p: Person): number {
 
 export class ContactIndex {
   private readonly byEmail = new Map<string, Entry>()
+  private readonly seenMessages = new Set<string>()
   private selfEmail = ''
 
   setSelf(email: string) {
     this.selfEmail = email.toLowerCase()
+  }
+
+  /** Adds everyone on a message once, however often the message is seen. */
+  addMessage(messageId: string, people: Person[], seenAt: number): boolean {
+    if (this.seenMessages.has(messageId)) return false
+    this.seenMessages.add(messageId)
+    for (const p of people) this.add(p, seenAt)
+    return true
+  }
+
+  toJSON(): Entry[] {
+    return [...this.byEmail.values()]
+  }
+
+  load(entries: Entry[]) {
+    for (const e of entries) {
+      if (e?.person?.email && !this.byEmail.has(e.person.email)) this.byEmail.set(e.person.email, { ...e })
+    }
   }
 
   add(p: Person, seenAt: number) {

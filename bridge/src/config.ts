@@ -30,4 +30,5 @@ export const paths = {
   googleClient: path.join(DATA_DIR, 'google-client.json'),
   googleToken: path.join(DATA_DIR, 'google-token.json'),
   drafts: path.join(DATA_DIR, 'drafts.json'),
+  contacts: path.join(DATA_DIR, 'contacts.json'),
 }

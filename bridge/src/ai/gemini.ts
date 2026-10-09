@@ -10,7 +10,7 @@ const TIMEOUT_MS = 25_000
 export class GeminiAi implements Ai {
   readonly name: string
   private readonly client: GoogleGenAI
-  // Low thinking keeps latency down; dropped automatically if a model rejects it.
+  // Minimal thinking keeps glasses round trips short; dropped automatically if a model rejects it.
   private thinking = true
 
   constructor(
@@ -39,7 +39,7 @@ export class GeminiAi implements Ai {
             responseJsonSchema: schema,
             temperature: 0.3,
             abortSignal: ctrl.signal,
-            ...(this.thinking ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } } : {}),
+            ...(this.thinking ? { thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL } } : {}),
           },
         })
         const text = res.text

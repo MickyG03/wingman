@@ -72,7 +72,8 @@ export class GmailMail implements MailPort {
   }
 
   private async fetch(ids: string[], withBody: boolean): Promise<RawEmail[]> {
-    return mapLimit(ids, 8, async id => {
+    // Gentle concurrency: Gmail enforces a per-user query-cost quota per minute.
+    return mapLimit(ids, 5, async id => {
       const res = await this.api.users.messages.get(
         withBody
           ? { userId: 'me', id, format: 'full' }
