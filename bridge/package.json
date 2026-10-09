@@ -1,0 +1,33 @@
+{
+  "name": "wingman-bridge",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=.env src/server.ts",
+    "start": "tsx --env-file-if-exists=.env src/server.ts",
+    "auth": "tsx --env-file-if-exists=.env scripts/auth.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "smoke": "tsx --env-file-if-exists=.env scripts/smoke.ts",
+    "chat": "tsx --env-file-if-exists=.env scripts/chat.ts"
+  },
+  "dependencies": {
+    "@google/genai": "^2.28.0",
+    "@googleapis/calendar": "^20.1.0",
+    "@googleapis/docs": "^14.1.0",
+    "@googleapis/drive": "^26.0.2",
+    "@googleapis/gmail": "^22.0.1",
+    "@googleapis/people": "^12.0.1",
+    "@googleapis/sheets": "^18.1.1",
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "ws": "^8.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/ws": "^8.18.2",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.3"
+  }
+}
