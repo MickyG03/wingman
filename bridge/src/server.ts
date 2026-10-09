@@ -15,7 +15,7 @@ import { Session } from './session.ts'
 import { deepgramStt } from './stt/deepgram.ts'
 import { fakeStt } from './stt/fake.ts'
 import type { SttFactory } from './stt/types.ts'
-import { Wingman } from './wingman.ts'
+import { Wingman, WingmanError } from './wingman.ts'
 
 if (config.token.length < 16) {
   console.error('WINGMAN_TOKEN is missing or too short. Copy .env.example to .env and set it.')
@@ -35,9 +35,14 @@ const user = () => wingman.userContext()
 const ai: Ai = config.geminiKey ? new GeminiAi(config.geminiKey, config.geminiModel, user, config.timeZone) : new FakeAi(user)
 wingman = new Wingman({ mail, calendar, ai, drafts, googleAuth })
 
-const useFakeStt = config.fakeStt || !config.deepgramKey
-const sttFor = (ctx: VoiceContext): SttFactory =>
-  useFakeStt ? fakeStt(() => ctx.kind) : deepgramStt(config.deepgramKey, config.deepgramModel)
+// A scripted transcript is only safe against demo data: with real Gmail it
+// could draft to a real contact the user never mentioned.
+const useFakeStt = config.fakeStt || (!config.deepgramKey && config.fakeGoogle)
+const sttFor = (ctx: VoiceContext): SttFactory => {
+  if (useFakeStt) return fakeStt(() => ctx.kind)
+  if (!config.deepgramKey) throw new WingmanError('STT', 'Voice needs DEEPGRAM_API_KEY in bridge/.env')
+  return deepgramStt(config.deepgramKey, config.deepgramModel)
+}
 
 // ── Transport ───────────────────────────────────────────────────────────
 
@@ -120,6 +125,6 @@ http.listen(config.port, () => {
   console.log(`[bridge] listening on http://localhost:${config.port} (ws path /ws)`)
   console.log(`[bridge] google: ${config.fakeGoogle ? 'FAKE fixtures (nothing is sent)' : googleAuth?.needed ? 'real, SIGN-IN NEEDED (npm run auth)' : 'real'}`)
   console.log(`[bridge] ai: ${ai.name}`)
-  console.log(`[bridge] speech-to-text: ${useFakeStt ? 'FAKE (scripted)' : `deepgram ${config.deepgramModel}`}`)
+  console.log(`[bridge] speech-to-text: ${useFakeStt ? 'FAKE (scripted)' : config.deepgramKey ? `deepgram ${config.deepgramModel}` : 'OFF (set DEEPGRAM_API_KEY)'}`)
   wingman.start()
 })

@@ -304,6 +304,16 @@ function showVoiceResult(s: State, r: VoiceResult): State {
   }
 }
 
+/** Keeps list cursors on a real row after the data under them shrinks. */
+function clampCursors(s: State): State {
+  const stack = s.stack.map(sc => {
+    if (sc.name !== 'home' && sc.name !== 'inbox') return sc
+    const max = Math.max(0, listLength(sc, s) - 1)
+    return sc.cursor > max ? { ...sc, cursor: max } : sc
+  })
+  return { ...s, stack }
+}
+
 /** True if the thinking screen waiting for `token` is still on top (not cancelled). */
 function awaiting(s: State, token: number | undefined): boolean {
   const sc = top(s)
@@ -315,10 +325,10 @@ function onResponse(s: State, res: ResponseMap[Request['type']], token?: number)
     case 'home': {
       let next: State = { ...s, home: res.data, homeError: '' }
       if (top(next).name === 'auth') next = pop(next)
-      return step(next)
+      return step(clampCursors(next))
     }
     case 'inbox':
-      return step({ ...s, inbox: res.items })
+      return step(clampCursors({ ...s, inbox: res.items }))
     case 'email': {
       const stack = s.stack.map(sc => (sc.name === 'email' && sc.id === res.email.id ? { ...sc, email: res.email } : sc))
       const inbox = s.inbox?.map(i => (i.id === res.email.id ? { ...i, unread: false } : i)) ?? null

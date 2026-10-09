@@ -127,3 +127,12 @@ describe('text layout', () => {
     expect(out.some(l => l.startsWith('> Item 9'))).toBe(true)
   })
 })
+
+describe('cursor clamping', () => {
+  it('keeps the home cursor on a row when home data shrinks', () => {
+    const moved = run(ready(), g('down'), g('down')).s // on "Speak" (row 2 of 3)
+    const small: HomeData = { ...home, nextMeeting: undefined }
+    const after = run(moved, { type: 'response', req: { type: 'home.get' }, res: { type: 'home', data: small } }).s
+    expect(top(after)).toMatchObject({ name: 'home', cursor: 1 })
+  })
+})
