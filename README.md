@@ -20,15 +20,9 @@ Welcome to the Wingman repository! This repository contains the glasses plugin a
 - Design: Pixel-accurate text wrapping that never overflows the 576x288 display, custom icons, and a single latest-wins display queue so the glasses never lag behind your input.
 
 ## Results
-  ![home](docs/screenshots/home.jpg)
-  ![briefing](docs/screenshots/briefing.jpg)
-  ![inbox](docs/screenshots/inbox.jpg)
+  ![meeting](docs/screenshots/meeting.jpg)
   ![email](docs/screenshots/email.jpg)
-  ![reply](docs/screenshots/reply.jpg)
-  ![draft](docs/screenshots/draft.jpg)
-  ![listening](docs/screenshots/listening.jpg)
-  ![invite](docs/screenshots/invite.jpg)
-  ![approve](docs/screenshots/approve.jpg)
+  ![files](docs/screenshots/files.jpg)
   ![dino](docs/screenshots/dino.jpg)
 
 
