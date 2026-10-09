@@ -12,3 +12,6 @@ token.json
 .DS_Store
 .dev/
 *.ehpk
+
+# Bridge secrets and state (Google tokens, drafts)
+.data/
