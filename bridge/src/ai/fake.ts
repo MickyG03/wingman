@@ -102,7 +102,9 @@ export class FakeAi implements Ai {
     const invite = /\b(lunch|dinner|coffee|meeting|meet|call|invite|schedule|sync)\b/.test(lower)
     const email = /^(email|e-mail|send|tell|write|ask|message|reply)\b/.test(lower)
     if (invite && !email) {
-      const withWho = /\bwith\s+([a-z]+(?:\s+[a-z]+)?)/i.exec(t)?.[1]?.replace(/\s+(on|at|tomorrow|today|next).*$/i, '')
+      const withWho = /\bwith\s+([a-z]+(?:\s+[a-z]+)?)/i
+        .exec(t)?.[1]
+        ?.replace(/\s+(on|at|tomorrow|today|next|this|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b.*$/i, '')
       const what = /\b(lunch|dinner|coffee|call|sync|meeting)\b/i.exec(t)?.[1] ?? 'Meeting'
       const start = parseWhen(t, new Date())
       return validateIntent({

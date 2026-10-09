@@ -8,7 +8,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "pack": "npm run build && evenhub pack app.json dist -o wingman.ehpk",
-    "simulate": "evenhub-simulator http://localhost:5173 --automation-port 9898"
+    "simulate": "evenhub-simulator http://localhost:5173 --automation-port 9898",
+    "test": "vitest run"
   },
   "dependencies": {
     "@evenrealities/even_hub_sdk": "^0.0.16",

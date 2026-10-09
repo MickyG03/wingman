@@ -1,115 +1,107 @@
-import {
-  waitForEvenAppBridge,
-  TextContainerProperty,
-  CreateStartUpPageContainer,
-  TextContainerUpgrade,
-  OsEventTypeList,
-} from '@evenrealities/even_hub_sdk'
-import { connectBridge, defaultBridgeUrl, type BridgeState } from './bridge/client'
-import { mountUi, setStatus, setTranscript } from './ui'
+// Wiring only: SDK events → gestures → reducer → effects + display.
 
-// Mic → STT (src/asr/stt.ts, still the template stub) and Claude are wired in
-// later steps. For now this proves the glasses ⇄ plugin ⇄ bridge path.
-
-mountUi()
+import { waitForEvenAppBridge } from '@evenrealities/even_hub_sdk'
+import { reduce } from './app/reducer'
+import { initialState, type Action, type Effect, type State } from './app/state'
+import { BridgeError, connectBridge, defaultBridgeUrl } from './bridge/client'
+import { Display } from './glasses/display'
+import { toGesture, type Gesture } from './glasses/input'
+import { Mic } from './glasses/mic'
+import { render } from './render/screens'
+import { mirror, mountUi, setStatus } from './ui'
 
 const TOKEN = import.meta.env.VITE_BRIDGE_TOKEN as string | undefined
 
-const bridge = await waitForEvenAppBridge()
-
-const screen = new TextContainerProperty({
-  xPosition: 0,
-  yPosition: 0,
-  width: 576,
-  height: 288,
-  borderWidth: 0,
-  borderColor: 5,
-  paddingLength: 4,
-  containerID: 1,
-  containerName: 'main',
-  content: 'Wingman\n\nStarting…',
-  isEventCapture: 1,
-})
-
-const created = await bridge.createStartUpPageContainer(
-  new CreateStartUpPageContainer({ containerTotalNum: 1, textObject: [screen] }),
-)
-if (created !== 0) {
-  setStatus('error', `createStartUpPageContainer failed: ${created}`)
-  console.error('Failed to create startup page')
-}
-
-let lastRender = ''
-let renderTimer: number | null = null
-let currentContent = ''
-
-function show(content: string) {
-  currentContent = content
-  setTranscript(content, '')
-  if (renderTimer !== null) return
-  renderTimer = window.setTimeout(async () => {
-    renderTimer = null
-    if (currentContent === lastRender) return
-    lastRender = currentContent
-    await bridge.textContainerUpgrade(
-      new TextContainerUpgrade({ containerID: 1, containerName: 'main', content: currentContent }),
-    )
-  }, 120) // debounce display writes — BLE render queue is slow
-}
-
-const STATE_TEXT: Record<BridgeState, string> = {
-  connecting: 'Connecting to bridge…',
-  ready: 'Bridge connected',
-  disconnected: 'Bridge offline',
-  unauthorized: 'Bridge rejected token',
-}
-
+let state: State = initialState()
+let display: Display | null = null
 let link: ReturnType<typeof connectBridge> | null = null
+let mic: Mic | null = null
+
+function dispatch(action: Action) {
+  const { state: next, effects } = reduce(state, action)
+  state = next
+  const frame = render(state)
+  display?.show(frame)
+  mirror(frame)
+  for (const e of effects) runEffect(e)
+}
+
+function runEffect(e: Effect) {
+  switch (e.kind) {
+    case 'request':
+      if (!link) return
+      link.request(e.req).then(
+        res => dispatch({ type: 'response', req: e.req, res, token: e.token }),
+        (err: BridgeError) => dispatch({ type: 'failed', req: e.req, code: err.code ?? 'INTERNAL', message: err.message, token: e.token }),
+      )
+      break
+    case 'mic':
+      void (e.on ? mic?.start() : mic?.stop())
+      break
+    case 'exit':
+      void bridge.shutDownPageContainer(1)
+      break
+  }
+}
+
+const gesture = (g: Gesture) => dispatch({ type: 'gesture', gesture: g, now: Date.now() })
+
+mountUi(gesture)
+
+const bridge = await waitForEvenAppBridge()
+display = new Display(bridge)
+if (!(await display.init(render(state)))) {
+  setStatus('error', 'Could not create the glasses page')
+  console.error('createStartUpPageContainer failed')
+}
+
 if (!TOKEN) {
   setStatus('error', 'VITE_BRIDGE_TOKEN not set — copy .env.example to .env.local')
-  show('Wingman\n\nNo bridge token.\nSet VITE_BRIDGE_TOKEN\nin plugin/.env.local')
+  dispatch({ type: 'conn', conn: 'unauthorized' })
 } else {
   link = connectBridge({
     url: defaultBridgeUrl(),
     token: TOKEN,
-    onState: (state, detail) => {
-      const text = STATE_TEXT[state] + (detail ? ` (${detail})` : '')
-      setStatus(state === 'ready' ? 'ready' : state === 'connecting' ? 'connecting' : 'error', text)
-      show(`Wingman\n\n${text}`)
+    onState: (s, detail, info) => {
+      setStatus(s === 'ready' ? 'ready' : s === 'connecting' ? 'connecting' : 'error', s === 'ready' ? 'Connected' : detail ?? s)
+      dispatch({
+        type: 'conn',
+        conn: s === 'disconnected' ? 'offline' : s,
+        detail,
+        authNeeded: info?.authNeeded,
+        fake: info?.fake,
+      })
     },
+    onPush: msg => dispatch({ type: 'push', msg }),
   })
+  mic = new Mic(
+    bridge,
+    pcm => link?.sendBinary(pcm),
+    () => dispatch({ type: 'micSilent' }),
+  )
 }
+
+const unsubscribe = bridge.onEvenHubEvent(event => {
+  mic?.handle(event)
+  const g = toGesture(event)
+  if (import.meta.env.DEV && (event.sysEvent || event.textEvent || event.listEvent)) {
+    console.log('[input]', JSON.stringify({ sys: event.sysEvent, text: event.textEvent, list: event.listEvent }), '->', g)
+  }
+  if (!g) return
+  if (g === 'exit') cleanup()
+  gesture(g)
+})
+
+const ticker = window.setInterval(() => dispatch({ type: 'tick', now: Date.now() }), 1000)
 
 let cleanedUp = false
 function cleanup() {
   if (cleanedUp) return
   cleanedUp = true
+  clearInterval(ticker)
+  void mic?.stop()
   link?.close()
   unsubscribe()
 }
-
-// CLICK_EVENT is 0 and protobuf omits zero-value fields, so a tap arrives as an
-// envelope with `eventType` undefined. Resolve the default inside the envelope
-// check, or events with no sysEvent at all (e.g. audio frames) read as taps.
-function eventTypeOf(envelope?: { eventType?: OsEventTypeList }): OsEventTypeList | null {
-  if (!envelope) return null
-  return envelope.eventType ?? OsEventTypeList.CLICK_EVENT
-}
-
-// Double-tap must always reach shutDownPageContainer so the user can exit,
-// whichever envelope it arrives in. Check it before CLICK_EVENT.
-const unsubscribe = bridge.onEvenHubEvent(event => {
-  const sysType = eventTypeOf(event.sysEvent)
-  const textType = eventTypeOf(event.textEvent)
-
-  if (sysType === OsEventTypeList.DOUBLE_CLICK_EVENT || textType === OsEventTypeList.DOUBLE_CLICK_EVENT) {
-    bridge.shutDownPageContainer(1)
-    return
-  }
-
-  if (sysType === OsEventTypeList.SYSTEM_EXIT_EVENT || sysType === OsEventTypeList.ABNORMAL_EXIT_EVENT) {
-    cleanup()
-  }
-})
 
 window.addEventListener('beforeunload', cleanup)

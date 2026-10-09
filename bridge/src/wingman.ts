@@ -201,8 +201,8 @@ export class Wingman extends EventEmitter {
     const now = Date.now()
     const timed = this.events.filter(e => !e.allDay && Date.parse(e.end) > now)
     return {
-      nextMeeting: timed[0],
-      upcoming: timed.slice(1, 4),
+      nextMeeting: timed[0] && this.present(timed[0]),
+      upcoming: timed.slice(1, 4).map(m => this.present(m)),
       unread: this.inbox.filter(m => m.unread).length,
       importantUnread: this.inbox.filter(m => m.unread && this.triage.get(m.id)?.important).length,
       pendingDrafts: this.d.drafts.pendingDrafts().slice(0, 3),
@@ -253,6 +253,11 @@ export class Wingman extends EventEmitter {
     return people.filter(p => p.email.toLowerCase() !== self)
   }
 
+  /** Meetings as shown on the glasses: without the user in the attendee list. */
+  private present(m: Meeting): Meeting {
+    return { ...m, attendees: this.others(m.attendees) }
+  }
+
   async meeting(eventId: string): Promise<{ meeting: Meeting; briefing: Briefing }> {
     await this.ready()
     const meeting = await this.findMeeting(eventId)
@@ -268,7 +273,7 @@ export class Wingman extends EventEmitter {
         briefing = { purpose: meeting.description?.slice(0, 100) || meeting.title, lastThread: '', points: [] }
       }
     }
-    return { meeting, briefing }
+    return { meeting: this.present(meeting), briefing }
   }
 
   // ── Voice → drafts / invites ───────────────────────────────────────────

@@ -150,3 +150,12 @@ describe('DraftStore', () => {
     await slow
   })
 })
+
+describe('fake intent', () => {
+  it('separates the attendee from the day', async () => {
+    const { FakeAi } = await import('../src/ai/fake.ts')
+    const ai = new FakeAi(() => ({ name: 'Me', email: 'me@x.com' }))
+    const intent = await ai.homeIntent('Lunch with Sam Thursday at 1', [])
+    expect(intent).toMatchObject({ intent: 'invite', attendees: ['Sam'], durationMin: 60 })
+  })
+})
